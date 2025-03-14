@@ -48,23 +48,24 @@ def vessel_DF_creator(response):
 def total_DF_creator(trackerDF, startDate=None, dateRange="P60D"):
     totalDF = pd.DataFrame({})
     error_list = []
+    target_imo = "9283227"  # Replace with the IMO number you want to check
+    found = False  # Flag to track if the target IMO is found
     for index, vesselIMO in trackerDF["IMO"].items():
         vesselIMO = str(vesselIMO)
-        if (not vesselIMO.isnumeric()) or (len(vesselIMO) != 7): # Print an error message if passed vesselIMO does not have correct format
+            
+        if vesselIMO == target_imo:
+            print(f"IMO {target_imo} found at row {index + 1}")
+            found = True  # Set flag to True when found
+
+        elif (not vesselIMO.isnumeric()) or (len(vesselIMO) != 7):  # Check if IMO format is invalid
             print("{} in row {} is not a valid IMO-number.".format(vesselIMO, index + 1))
+            continue
+
+        elif not found:
+            print(f"IMO {target_imo} not found in the list.")
             continue
         response = get_vessel(vesselIMO, startDate, dateRange)
         if response.status_code == 200:
-            if vesselIMO == "9283227":
-                print("Vessel no. 9283227 okay.")
-                newDF = vessel_DF_creator(response)
-                newDF["class"] = trackerDF.loc[index, "CLASS"]
-                newDF["project"] = trackerDF.loc[index, "PROJECT"]
-                totalDF = pd.concat([totalDF, newDF])
-                time.sleep(0.3)
-                continue
-            else:
-                print("VesselIMO: 9283227 not in list")
             print("{} okay.".format(vesselIMO))
             newDF = vessel_DF_creator(response)
             newDF["class"] = trackerDF.loc[index, "CLASS"]
