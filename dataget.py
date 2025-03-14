@@ -62,10 +62,9 @@ def total_DF_creator(trackerDF, startDate=None, dateRange="P60D"):
                 newDF["project"] = trackerDF.loc[index, "PROJECT"]
                 totalDF = pd.concat([totalDF, newDF])
                 time.sleep(0.3)
-            else:
-                if response.json()["vesselCalls"] == []:
-                    print("No data for vessel no. {}.".format(vesselIMO))
                 continue
+            else:
+                print("VesselIMO: 9283227 not in list")
             print("{} okay.".format(vesselIMO))
             newDF = vessel_DF_creator(response)
             newDF["class"] = trackerDF.loc[index, "CLASS"]
