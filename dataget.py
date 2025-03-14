@@ -55,6 +55,17 @@ def total_DF_creator(trackerDF, startDate=None, dateRange="P60D"):
             continue
         response = get_vessel(vesselIMO, startDate, dateRange)
         if response.status_code == 200:
+            if vesselIMO == "9283227":
+                print("Vessel no. 9283227 okay.")
+                newDF = vessel_DF_creator(response)
+                newDF["class"] = trackerDF.loc[index, "CLASS"]
+                newDF["project"] = trackerDF.loc[index, "PROJECT"]
+                totalDF = pd.concat([totalDF, newDF])
+                time.sleep(0.3)
+            else:
+                if response.json()["vesselCalls"] == []:
+                    print("No data for vessel no. {}.".format(vesselIMO))
+                continue
             print("{} okay.".format(vesselIMO))
             newDF = vessel_DF_creator(response)
             newDF["class"] = trackerDF.loc[index, "CLASS"]
