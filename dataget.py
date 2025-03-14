@@ -48,21 +48,10 @@ def vessel_DF_creator(response):
 def total_DF_creator(trackerDF, startDate=None, dateRange="P60D"):
     totalDF = pd.DataFrame({})
     error_list = []
-    target_imo = "9283227"  # Replace with the IMO number you want to check
-    found = False  # Flag to track if the target IMO is found
     for index, vesselIMO in trackerDF["IMO"].items():
         vesselIMO = str(vesselIMO)
-            
-        if vesselIMO == target_imo:
-            print(f"IMO {target_imo} found at row {index + 1}")
-            found = True  # Set flag to True when found
-
-        elif (not vesselIMO.isnumeric()) or (len(vesselIMO) != 7):  # Check if IMO format is invalid
+        if (not vesselIMO.isnumeric()) or (len(vesselIMO) != 7):  # Check if IMO format is invalid
             print("{} in row {} is not a valid IMO-number.".format(vesselIMO, index + 1))
-            continue
-
-        elif not found:
-            print(f"IMO {target_imo} not found in the list.")
             continue
         response = get_vessel(vesselIMO, startDate, dateRange)
         if response.status_code == 200:
