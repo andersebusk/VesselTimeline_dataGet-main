@@ -2,3 +2,5 @@ pandas
 pymongo
 requests
 openpyxl
+msal
+sqlalchemy
