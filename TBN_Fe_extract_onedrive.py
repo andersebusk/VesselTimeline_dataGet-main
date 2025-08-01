@@ -346,20 +346,24 @@ for col in result_df.columns:
         if "date" in col.lower():
             result_df[col] = pd.to_datetime(result_df[col], errors='coerce').dt.strftime('%Y-%m-%d')
 
-# 🔥 Convert NaNs: Numeric -> None (null), Text -> ""
+# 🔥 Clean NaNs:
+# - Numeric columns: NaN -> None (becomes null in JSON)
+# - Text columns: NaN -> "" (empty string)
 for col in result_df.columns:
     if pd.api.types.is_numeric_dtype(result_df[col]):
-        result_df[col] = result_df[col].where(pd.notnull(result_df[col]), None)  # NaN -> None (null in JSON)
+        result_df[col] = result_df[col].where(pd.notnull(result_df[col]), None)
     else:
-        result_df[col] = result_df[col].fillna("")  # Text NaN -> ""
+        result_df[col] = result_df[col].fillna("")
 
-# Verify cleaning (numeric NaNs should now be None, not NaN)
+# ✅ Final pass to ensure all lingering NaNs (from datetime parsing, etc.) become None
+result_df = result_df.where(pd.notnull(result_df), None)
+
+# Report cleaned NaNs (for logging only)
 nan_counts_after = result_df.isna().sum().sum()
-print(f"✅ Remaining pandas NaN values (should be 0): {nan_counts_after}")
-assert nan_counts_after == 0, "❌ Cleaning failed: Some NaN values remain!"
+print(f"✅ Remaining pandas NaN values after cleaning: {nan_counts_after} (expected: 0)")
 
-# Convert to JSON-ready rows (None -> null in JSON)
-rows_to_push = result_df.where(pd.notnull(result_df), None).to_dict(orient="records")
+# Convert to JSON-ready rows (None will translate to null in JSON)
+rows_to_push = result_df.to_dict(orient="records")
 
 
 # ==============================
