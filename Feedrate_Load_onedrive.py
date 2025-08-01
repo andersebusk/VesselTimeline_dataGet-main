@@ -4,7 +4,6 @@ import openpyxl
 import re
 import difflib
 import unicodedata
-import warnings
 from datetime import datetime as dt
 from io import BytesIO
 import pandas as pd
@@ -28,7 +27,7 @@ DB_PASS = os.getenv("DB_PASS")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")  # Convert to int later if needed
 DB_NAME = os.getenv("DB_NAME")
-DB_TABLE_2 = os.getenv("DB_TABLE_2")
+DB_TABLE = os.getenv("DB_TABLE_2")
 
 # ==============================
 # HELPER FUNCTIONS
@@ -190,12 +189,12 @@ print("✅ Data cleaned and ready for DB insertion.")
 # Insert into MySQL
 engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
 with engine.begin() as conn:
-    conn.execute(text(f"DELETE FROM {DB_TABLE_2}"))
-    conn.execute(text(f"ALTER TABLE {DB_TABLE_2} AUTO_INCREMENT = 1"))
-print(f"🗑 Cleared existing data from {DB_TABLE_2}")
+    conn.execute(text(f"DELETE FROM {DB_TABLE}"))
+    conn.execute(text(f"ALTER TABLE {DB_TABLE} AUTO_INCREMENT = 1"))
+print(f"🗑 Cleared existing data from {DB_TABLE}")
 
-df.to_sql(DB_TABLE_2, con=engine, if_exists="append", index=False)
-print(f"✅ Inserted {len(df)} rows into {DB_TABLE_2} in MySQL!")
+df.to_sql(DB_TABLE, con=engine, if_exists="append", index=False)
+print(f"✅ Inserted {len(df)} rows into {DB_TABLE} in MySQL!")
 
 # ==============================
 # STEP 4: PUSH TO POWER BI STREAMING DATASET
@@ -276,7 +275,7 @@ print(f"✅ Verified table: {PBI_TABLE_NAME}")
 # ==============================
 print("📥 Fetching data from MySQL to push into Power BI...")
 with engine.connect() as conn:
-    result_df = pd.read_sql(f"SELECT * FROM {DB_TABLE_2}", conn)
+    result_df = pd.read_sql(f"SELECT * FROM {DB_TABLE}", conn)
 
 # Convert date columns to string (ISO format)
 for col in result_df.columns:
