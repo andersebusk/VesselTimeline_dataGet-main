@@ -71,7 +71,7 @@ def find_headers(sheet, header_strings):
 
 def parse_date(date_value):
     if isinstance(date_value, dt):
-        return date_value.strftime("%Y-%m-%d")
+        return date_value.strftime("%Y-%m-%d")  # ISO format for MySQL
     date_patterns = [r"(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})"]
     for pattern in date_patterns:
         match = re.match(pattern, str(date_value))
@@ -161,20 +161,25 @@ header_mapping = {
 
 df = df.rename(columns=header_mapping)
 
-# Ensure all required DB columns exist
-db_columns = ["VesselID", "KVisc100", "BN", "TopUPVolume", "Vanadium", "PQIndex", "OilOnLabel", "ISOCode", "PartCount4", "PartCount6", "PartCount14"]
+# Ensure all required DB columns exist including Date
+db_columns = ["VesselID", "Date", "KVisc100", "BN", "TopUPVolume", "Vanadium", 
+              "PQIndex", "OilOnLabel", "ISOCode", "PartCount4", "PartCount6", "PartCount14"]
 for col in db_columns:
     if col not in df.columns:
-        df[col] = None  # Fill missing columns with NULL
+        df[col] = None
 
 df = df[db_columns]
 
+# Convert Date to proper date object for MySQL
+df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+
 # Clean numeric fields
 for col in db_columns:
-    if col != "VesselID":  
+    if col not in ["VesselID", "Date"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
 print(f"✅ Extracted {len(df)} rows ready for DB")
+print(df.head())  # Debug: Preview data including Date
 
 # ==============================
 # STEP 4: INSERT INTO MYSQL
@@ -214,6 +219,9 @@ if not dataset:
 PBI_DATASET_ID = dataset["id"]
 tables_url = f"https://api.powerbi.com/v1.0/myorg/groups/{PBI_WORKSPACE_ID}/datasets/{PBI_DATASET_ID}/tables"
 PBI_TABLE_NAME = requests.get(tables_url, headers=pbi_headers).json()["value"][0]["name"]
+
+# Format Date for Power BI push (ISO string)
+df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime('%Y-%m-%d')
 
 # Prepare rows for Power BI
 rows_to_push = df.replace([np.nan, np.inf, -np.inf], None).to_dict(orient="records")
