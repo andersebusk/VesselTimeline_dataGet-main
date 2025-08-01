@@ -277,29 +277,27 @@ print("📥 Fetching data from MySQL to push into Power BI...")
 with engine.connect() as conn:
     result_df = pd.read_sql(f"SELECT * FROM {DB_TABLE_2}", conn)
 
+import numpy as np
+
 # Convert date columns to string (ISO format)
 for col in result_df.columns:
     if pd.api.types.is_datetime64_any_dtype(result_df[col]) or pd.api.types.is_object_dtype(result_df[col]):
         if "date" in col.lower():
             result_df[col] = pd.to_datetime(result_df[col], errors='coerce').dt.strftime('%Y-%m-%d')
 
-# 🔥 Clean NaNs:
-# - Numeric columns: NaN -> None (becomes null in JSON)
-# - Text columns: NaN -> "" (empty string)
+# 🔥 Convert NaNs: Numeric -> 0, Text -> ""
 for col in result_df.columns:
     if pd.api.types.is_numeric_dtype(result_df[col]):
-        result_df[col] = result_df[col].where(pd.notnull(result_df[col]), None)
+        result_df[col] = result_df[col].fillna(0)  # Numeric NaN -> 0
     else:
-        result_df[col] = result_df[col].fillna("")
+        result_df[col] = result_df[col].fillna("")  # Text NaN -> ""
 
-# ✅ Final pass to ensure all lingering NaNs (from datetime parsing, etc.) become None
-result_df = result_df.where(pd.notnull(result_df), None)
-
-# Report cleaned NaNs (for logging only)
+# Verify cleaning
 nan_counts_after = result_df.isna().sum().sum()
-print(f"✅ Remaining pandas NaN values after cleaning: {nan_counts_after} (expected: 0)")
+print(f"✅ NaN values after cleaning: {nan_counts_after}")
+assert nan_counts_after == 0, "❌ Cleaning failed: Some NaN values remain!"
 
-# Convert to JSON-ready rows (None will translate to null in JSON)
+# Convert to JSON-ready rows
 rows_to_push = result_df.to_dict(orient="records")
 
 
