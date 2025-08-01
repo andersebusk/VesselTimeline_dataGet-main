@@ -4,4 +4,4 @@ requests
 openpyxl
 msal
 sqlalchemy
-pymsql
+pymysql
