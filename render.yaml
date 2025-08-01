@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: my-service
-    env: python
-    pythonVersion: 3.10  # or 3.11 for latest
-    buildCommand: |
-      pip install --upgrade pip setuptools wheel
-      pip install --no-cache-dir -r requirements.txt
-    startCommand: python main.py
