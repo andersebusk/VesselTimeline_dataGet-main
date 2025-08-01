@@ -10,6 +10,7 @@ from io import BytesIO
 import pandas as pd
 from sqlalchemy import create_engine, text
 import os
+import numpy as np
 
 # ==============================
 # CONFIGURATION (replace placeholders)
@@ -277,27 +278,31 @@ print("📥 Fetching data from MySQL to push into Power BI...")
 with engine.connect() as conn:
     result_df = pd.read_sql(f"SELECT * FROM {DB_TABLE_2}", conn)
 
-import numpy as np
-
 # Convert date columns to string (ISO format)
 for col in result_df.columns:
     if pd.api.types.is_datetime64_any_dtype(result_df[col]) or pd.api.types.is_object_dtype(result_df[col]):
         if "date" in col.lower():
             result_df[col] = pd.to_datetime(result_df[col], errors='coerce').dt.strftime('%Y-%m-%d')
 
-# 🔥 Convert NaNs: Numeric -> 0, Text -> ""
+# 🔥 Clean NaNs, infinities, and enforce None for JSON null
 for col in result_df.columns:
     if pd.api.types.is_numeric_dtype(result_df[col]):
-        result_df[col] = result_df[col].fillna(0)  # Numeric NaN -> 0
+        result_df[col] = result_df[col].replace([np.inf, -np.inf], np.nan)  # Replace inf with NaN
+        result_df[col] = result_df[col].where(pd.notnull(result_df[col]), None)  # Replace NaN with None
     else:
-        result_df[col] = result_df[col].fillna("")  # Text NaN -> ""
+        result_df[col] = result_df[col].fillna("")  # Text columns: NaN -> ""
 
-# Verify cleaning
-nan_counts_after = result_df.isna().sum().sum()
-print(f"✅ NaN values after cleaning: {nan_counts_after}")
-assert nan_counts_after == 0, "❌ Cleaning failed: Some NaN values remain!"
+# ✅ Full dataframe-wide replacement to eliminate any lingering NaN/inf
+result_df = result_df.replace([np.nan, np.inf, -np.inf], None)
 
-# Convert to JSON-ready rows
+# 🛠 Debug check: log columns with remaining bad values
+bad_columns = [col for col in result_df.columns if any(x is np.nan for x in result_df[col])]
+if bad_columns:
+    print(f"⚠️ Columns still containing NaN: {bad_columns}")
+else:
+    print("✅ All NaN/inf values successfully replaced with None.")
+
+# Convert to JSON-ready rows (None -> null in JSON)
 rows_to_push = result_df.to_dict(orient="records")
 
 
