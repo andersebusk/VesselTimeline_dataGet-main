@@ -179,6 +179,21 @@ df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime('%Y-%m-%d')
 print("✅ Data cleaned and ready for Power BI push.")
 
 # ==============================
+# APPLY RENAMING FOR POWER BI
+# ==============================
+print("🔄 Renaming columns for Power BI output...")
+
+PBI_COLUMN_MAPPING = {
+   "VesselID": "Vessel Name",
+    "Date": "Date",
+    "ME_Load": "ME Load",
+    "CylinderOilFeedrate": "Cylinder Oil Feedrate",
+    "ME_RH": "ME RH"
+}
+
+df.rename(columns=PBI_COLUMN_MAPPING, inplace=True)
+
+# ==============================
 # STEP 3: AUTHENTICATE POWER BI AND PUSH DATA
 # ==============================
 print("🔑 Authenticating Power BI Service Principal...")

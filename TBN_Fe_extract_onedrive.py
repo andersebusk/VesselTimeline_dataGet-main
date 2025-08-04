@@ -245,6 +245,28 @@ for col in numeric_columns:
 df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime('%Y-%m-%d')
 
 # ==============================
+# APPLY RENAMING FOR POWER BI
+# ==============================
+print("🔄 Renaming columns for Power BI output...")
+
+PBI_COLUMN_MAPPING = {
+    "VesselID": "Vessel Name",
+    "Date": "Date",
+    "Cylinder": "Cylinder",
+    "Fe_Magnet": "Fe Magnetic",
+    "Fe_Corrosion": "Fe Corrosive",
+    "Fe_Total": "Fe Total",
+    "Residual_TBN": "Residual TBN",
+    "Unit_RH": "Unit RH",
+    "TBN_Fed": "TBN Fed",
+    "Fuel_Sulph": "Fuel Sulphur Content",
+    "ME_Load": "ME Load",
+    "ME_RH": "ME RH"
+}
+
+df.rename(columns=PBI_COLUMN_MAPPING, inplace=True)
+
+# ==============================
 # STEP 3: PUSH TO POWER BI
 # ==============================
 print("🔑 Authenticating Power BI...")

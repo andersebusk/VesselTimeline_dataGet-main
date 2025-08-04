@@ -171,6 +171,35 @@ for col in db_columns:
 print(f"✅ Extracted {len(df)} rows ready for Power BI")
 
 # ==============================
+# APPLY RENAMING FOR POWER BI
+# ==============================
+print("🔄 Renaming columns for Power BI output...")
+
+PBI_COLUMN_MAPPING = {
+    "VesselID": "Vessel Name",
+    "Date": "Date",
+    "KVisc100": "Viscosity @ 100C",
+    "BN": "BN",
+    "TopUPVolume": "Top Up Volume",
+    "Vanadium": "Vanadium",
+    "PQIndex": "PQ Index",
+    "OilOnLabel": "Oil On Label",
+    "ISOCode": "ISO Code",
+    "PartCount4": "Particle count > 4",
+    "PartCount6": "Particle count > 6",
+    "PartCount14": "Particle count > 14"
+}
+
+df.rename(columns=PBI_COLUMN_MAPPING, inplace=True)
+
+# ✅ Validate mapped columns
+missing_cols = [col for col in PBI_COLUMN_MAPPING.values() if col not in df.columns]
+if missing_cols:
+    print(f"⚠️ Warning: Missing Power BI columns in DataFrame: {missing_cols}")
+else:
+    print("✅ All Power BI columns renamed successfully.")
+
+# ==============================
 # STEP 3: PUSH TO POWER BI DIRECTLY
 # ==============================
 print("🔑 Authenticating Power BI Service Principal...")
