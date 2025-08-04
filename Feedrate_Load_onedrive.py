@@ -2,32 +2,30 @@ import msal
 import requests
 import openpyxl
 import re
-import difflib
 import unicodedata
+import warnings
 from datetime import datetime as dt
+import difflib
 from io import BytesIO
 import pandas as pd
-from sqlalchemy import create_engine, text
 import os
 import numpy as np
 
 # ==============================
-# CONFIGURATION (replace placeholders)
+# CONFIGURATION
 # ==============================
 TENANT_ID = os.getenv("TENANT_ID")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 TARGET_SITE_DISPLAY_NAME = os.getenv("TARGET_SITE_DISPLAY_NAME")
-FOLDER_PATH = os.getenv("FOLDER_PATH")
-TARGET_FILE_NAME = os.getenv("TARGET_FILE_NAME")
+FOLDER_PATH = os.getenv("FOLDER_PATH")  # Folder in OneDrive/SharePoint
+TARGET_FILE_NAME = os.getenv("TARGET_FILE_NAME")  # Excel filename
 
-# MySQL DB details (already created)
-DB_USER = os.getenv("DB_USER")
-DB_PASS = os.getenv("DB_PASS")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")  # Convert to int later if needed
-DB_NAME = os.getenv("DB_NAME")
-DB_TABLE = os.getenv("DB_TABLE_2")
+PBI_WORKSPACE_ID = os.getenv("PBI_WORKSPACE_ID")
+PBI_TENANT_ID = os.getenv("PBI_TENANT_ID")
+PBI_CLIENT_ID = os.getenv("PBI_CLIENT_ID")
+PBI_CLIENT_SECRET = os.getenv("PBI_CLIENT_SECRET")
+TARGET_DATASET_NAME = "FeedrateData"  # Power BI streaming dataset name
 
 # ==============================
 # HELPER FUNCTIONS
@@ -40,10 +38,7 @@ def normalize_string(s):
     return s.strip()
 
 def string_similarity(str1, str2):
-    str1_normalized = normalize_string(str1)
-    str2_normalized = normalize_string(str2)
-    match = difflib.SequenceMatcher(None, str1_normalized, str2_normalized)
-    return match.ratio()
+    return difflib.SequenceMatcher(None, normalize_string(str1), normalize_string(str2)).ratio()
 
 def find_value_columns_by_headers(sheet, header_strings):
     header_indices = {}
@@ -52,7 +47,6 @@ def find_value_columns_by_headers(sheet, header_strings):
             for index, cell in enumerate(row[:100]):
                 cell_value_str = str(cell.value) if cell.value else ""
                 cell_value_str_normalized = normalize_string(cell_value_str)
-
                 for target_header in header_strings:
                     target_normalized = normalize_string(target_header)
                     if string_similarity(cell_value_str_normalized, target_normalized) >= 0.60:
@@ -101,7 +95,6 @@ def process_xlsx(sheet, date_column_index, ME_load_index, header_columns, vessel
         if not parsed_date:
             continue
         
-        # Handle ME_RH and ME as the same column
         me_rh_value = None
         if header_columns.get("ME rh") is not None:
             me_rh_value = row[header_columns["ME rh"]]
@@ -171,44 +164,22 @@ for sheet_name in [s for s in workbook.sheetnames if s not in ["Overview", "Dash
     all_rows.extend(rows)
     print(f"✅ Processed '{sheet_name}' → {len(rows)} rows added")
 
-print(f"\n📊 Total rows ready for DB insertion: {len(all_rows)}")
+print(f"\n📊 Total rows ready for Power BI push: {len(all_rows)}")
 
-# ==============================
-# STEP 3: CLEAN & INSERT INTO MYSQL
-# ==============================
+# Convert to DataFrame
 df = pd.DataFrame(all_rows)
 
 # Clean numeric fields
 numeric_columns = ["ME_Load", "CylinderOilFeedrate", "ME_RH"]
-
 for col in numeric_columns:
     df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-print("✅ Data cleaned and ready for DB insertion.")
-
-# Insert into MySQL
-engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
-with engine.begin() as conn:
-    conn.execute(text(f"DELETE FROM {DB_TABLE}"))
-    conn.execute(text(f"ALTER TABLE {DB_TABLE} AUTO_INCREMENT = 1"))
-print(f"🗑 Cleared existing data from {DB_TABLE}")
-
-df.to_sql(DB_TABLE, con=engine, if_exists="append", index=False)
-print(f"✅ Inserted {len(df)} rows into {DB_TABLE} in MySQL!")
+# Ensure Date is ISO for Power BI
+df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime('%Y-%m-%d')
+print("✅ Data cleaned and ready for Power BI push.")
 
 # ==============================
-# STEP 4: PUSH TO POWER BI STREAMING DATASET
-# ==============================
-
-# Power BI Configuration
-PBI_WORKSPACE_ID = os.getenv("PBI_WORKSPACE_ID")
-PBI_TENANT_ID = os.getenv("PBI_TENANT_ID")
-PBI_CLIENT_ID = os.getenv("PBI_CLIENT_ID")
-PBI_CLIENT_SECRET = os.getenv("PBI_CLIENT_SECRET")
-
-
-# ==============================
-# AUTHENTICATE POWER BI SERVICE PRINCIPAL
+# STEP 3: AUTHENTICATE POWER BI AND PUSH DATA
 # ==============================
 print("🔑 Authenticating Power BI Service Principal...")
 pbi_app = msal.ConfidentialClientApplication(
@@ -224,103 +195,27 @@ if "access_token" not in pbi_token:
 
 pbi_access_token = pbi_token["access_token"]
 pbi_headers = {"Authorization": f"Bearer {pbi_access_token}"}
-print("✅ Power BI token acquired successfully.\n")
 
-# ==============================
-# VERIFY DATASET AND TABLE
-# ==============================
-print(f"📥 Fetching datasets from workspace: {PBI_WORKSPACE_ID}")
+# Verify dataset and table
 datasets_url = f"https://api.powerbi.com/v1.0/myorg/groups/{PBI_WORKSPACE_ID}/datasets"
-resp = requests.get(datasets_url, headers=pbi_headers)
-
-if resp.status_code != 200:
-    print(f"❌ Failed to list datasets. Status: {resp.status_code}, Response: {resp.text}")
-    raise SystemExit("Stopping: Could not list datasets.")
-
-datasets = resp.json().get("value", [])
-if not datasets:
-    raise SystemExit("⚠️ No datasets found in this workspace.")
-
-# Filter for streaming datasets
-streaming_datasets = [ds for ds in datasets if ds.get("addRowsAPIEnabled", False)]
-if not streaming_datasets:
-    raise SystemExit("❌ No streaming (push API enabled) datasets found in this workspace.")
-
-# ✅ Explicitly select the streaming dataset by name
-TARGET_DATASET_NAME = "FeedrateData"  # <-- Change to match the dataset name you want
-
-dataset = next((ds for ds in streaming_datasets if ds["name"].lower() == TARGET_DATASET_NAME.lower()), None)
+datasets = requests.get(datasets_url, headers=pbi_headers).json().get("value", [])
+dataset = next((ds for ds in datasets if ds.get("addRowsAPIEnabled") and ds["name"].lower() == TARGET_DATASET_NAME.lower()), None)
 if not dataset:
     raise SystemExit(f"❌ Streaming dataset '{TARGET_DATASET_NAME}' not found in workspace.")
 
 PBI_DATASET_ID = dataset["id"]
-print(f"🎯 Selected streaming dataset: {dataset['name']} (ID: {PBI_DATASET_ID})")
-
-# Verify tables in selected dataset
 tables_url = f"https://api.powerbi.com/v1.0/myorg/groups/{PBI_WORKSPACE_ID}/datasets/{PBI_DATASET_ID}/tables"
-tables_resp = requests.get(tables_url, headers=pbi_headers)
-if tables_resp.status_code != 200:
-    print(f"❌ Cannot access tables. Status: {tables_resp.status_code}, Response: {tables_resp.text}")
-    raise SystemExit("Stopping: Dataset table verification failed.")
+PBI_TABLE_NAME = requests.get(tables_url, headers=pbi_headers).json()["value"][0]["name"]
 
-tables_data = tables_resp.json().get("value", [])
-if not tables_data:
-    raise SystemExit("⚠️ No tables found in this dataset.")
+# Convert dataframe to JSON-friendly records
+rows_to_push = df.replace([np.nan, np.inf, -np.inf], None).to_dict(orient="records")
 
-PBI_TABLE_NAME = tables_data[0]["name"]
-print(f"✅ Verified table: {PBI_TABLE_NAME}")
-
-# ==============================
-# FETCH DATA FROM MYSQL
-# ==============================
-print("📥 Fetching data from MySQL to push into Power BI...")
-with engine.connect() as conn:
-    result_df = pd.read_sql(f"SELECT * FROM {DB_TABLE}", conn)
-
-# Convert date columns to string (ISO format)
-for col in result_df.columns:
-    if pd.api.types.is_datetime64_any_dtype(result_df[col]) or pd.api.types.is_object_dtype(result_df[col]):
-        if "date" in col.lower():
-            result_df[col] = pd.to_datetime(result_df[col], errors='coerce').dt.strftime('%Y-%m-%d')
-
-# 🔥 Clean NaNs, infinities, and enforce None for JSON null
-for col in result_df.columns:
-    if pd.api.types.is_numeric_dtype(result_df[col]):
-        result_df[col] = result_df[col].replace([np.inf, -np.inf], np.nan)  # Replace inf with NaN
-        result_df[col] = result_df[col].where(pd.notnull(result_df[col]), None)  # Replace NaN with None
-    else:
-        result_df[col] = result_df[col].fillna("")  # Text columns: NaN -> ""
-
-# ✅ Full dataframe-wide replacement to eliminate any lingering NaN/inf
-result_df = result_df.replace([np.nan, np.inf, -np.inf], None)
-
-# 🛠 Debug check: log columns with remaining bad values
-bad_columns = [col for col in result_df.columns if any(x is np.nan for x in result_df[col])]
-if bad_columns:
-    print(f"⚠️ Columns still containing NaN: {bad_columns}")
-else:
-    print("✅ All NaN/inf values successfully replaced with None.")
-
-# Convert to JSON-ready rows (None -> null in JSON)
-rows_to_push = result_df.to_dict(orient="records")
-
-
-
-# ==============================
-# CLEAR OLD ROWS IN STREAMING DATASET
-# ==============================
+# Clear old rows in Power BI dataset
 pbi_clear_url = f"https://api.powerbi.com/v1.0/myorg/groups/{PBI_WORKSPACE_ID}/datasets/{PBI_DATASET_ID}/tables/{PBI_TABLE_NAME}/rows"
 print("🗑 Clearing old rows in Power BI streaming dataset...")
-clear_response = requests.delete(pbi_clear_url, headers=pbi_headers)
+requests.delete(pbi_clear_url, headers=pbi_headers)
 
-if clear_response.status_code in [200, 202]:
-    print("✅ Cleared old rows in Power BI.")
-else:
-    print(f"⚠️ Warning clearing rows: {clear_response.status_code} {clear_response.text}")
-
-# ==============================
-# PUSH ROWS TO POWER BI
-# ==============================
+# Push rows to Power BI
 print(f"📤 Pushing {len(rows_to_push)} rows to Power BI...")
 batch_size = 10000
 for i in range(0, len(rows_to_push), batch_size):

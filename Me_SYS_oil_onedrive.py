@@ -8,12 +8,11 @@ from datetime import datetime as dt
 import difflib
 from io import BytesIO
 import pandas as pd
-from sqlalchemy import create_engine, text
 import os
 import numpy as np
 
 # ==============================
-# CONFIGURATION (replace with environment or constants)
+# CONFIGURATION
 # ==============================
 TENANT_ID = os.getenv("TENANT_ID")
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -22,15 +21,12 @@ TARGET_SITE_DISPLAY_NAME = os.getenv("TARGET_SITE_DISPLAY_NAME")
 FOLDER_PATH = os.getenv("FOLDER_PATH_ME")
 TARGET_FILE_NAME = os.getenv("TARGET_FILE_NAME_ME")
 
-DB_USER = os.getenv("DB_USER")
-DB_PASS = os.getenv("DB_PASS")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
-DB_TABLE = os.getenv("DB_TABLE_3")
+PBI_WORKSPACE_ID = os.getenv("PBI_WORKSPACE_ID")
+PBI_TENANT_ID = os.getenv("PBI_TENANT_ID")
+PBI_CLIENT_ID = os.getenv("PBI_CLIENT_ID")
+PBI_CLIENT_SECRET = os.getenv("PBI_CLIENT_SECRET")
+TARGET_DATASET_NAME = "MeSYSoil"
 
-
-# Headers from Excel to extract
 HEADERS_TO_FIND = [
     "Viscosity @ 40C",
     "Viscosity @ 100C",
@@ -71,7 +67,7 @@ def find_headers(sheet, header_strings):
 
 def parse_date(date_value):
     if isinstance(date_value, dt):
-        return date_value.strftime("%Y-%m-%d")  # ISO format for MySQL
+        return date_value.strftime("%Y-%m-%d")
     date_patterns = [r"(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})"]
     for pattern in date_patterns:
         match = re.match(pattern, str(date_value))
@@ -117,7 +113,7 @@ def extract_me_sys_data(workbook, headers_to_find):
     return pd.DataFrame(data_rows)
 
 # ==============================
-# STEP 1: AUTHENTICATE & DOWNLOAD EXCEL FROM ONEDRIVE
+# STEP 1: FETCH EXCEL FROM ONEDRIVE
 # ==============================
 print("🔑 Authenticating to Microsoft Graph...")
 app = msal.ConfidentialClientApplication(CLIENT_ID, authority=f"https://login.microsoftonline.com/{TENANT_ID}", client_credential=CLIENT_SECRET)
@@ -143,9 +139,7 @@ print("✅ Excel downloaded successfully!")
 print("📊 Extracting ME SYS Oil data...")
 df = extract_me_sys_data(workbook, HEADERS_TO_FIND)
 
-# ==============================
-# STEP 3: MAP TO DB COLUMNS
-# ==============================
+# Map headers to clean names
 header_mapping = {
     "Viscosity @ 100C": "KVisc100",
     "Base Number": "BN",
@@ -158,52 +152,27 @@ header_mapping = {
     "Particle count > 14 [μm/ml]": "PartCount14",
     "Vanadium": "Vanadium"
 }
-
 df = df.rename(columns=header_mapping)
 
-# Ensure all required DB columns exist including Date
+# Ensure required columns
 db_columns = ["VesselID", "Date", "KVisc100", "BN", "TopUPVolume", "Vanadium", 
               "PQIndex", "OilOnLabel", "ISOCode", "PartCount4", "PartCount6", "PartCount14"]
 for col in db_columns:
     if col not in df.columns:
         df[col] = None
-
 df = df[db_columns]
 
-# Convert Date to proper date object for MySQL
-df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
-
-# Clean numeric fields
+# Clean numeric fields and format date
+df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime('%Y-%m-%d')
 for col in db_columns:
     if col not in ["VesselID", "Date"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-print(f"✅ Extracted {len(df)} rows ready for DB")
-print(df.head())  # Debug: Preview data including Date
+print(f"✅ Extracted {len(df)} rows ready for Power BI")
 
 # ==============================
-# STEP 4: INSERT INTO MYSQL
+# STEP 3: PUSH TO POWER BI DIRECTLY
 # ==============================
-print("💾 Inserting into MySQL...")
-engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
-with engine.begin() as conn:
-    conn.execute(text(f"DELETE FROM {DB_TABLE}"))
-    conn.execute(text(f"ALTER TABLE {DB_TABLE} AUTO_INCREMENT = 1"))
-df.to_sql(DB_TABLE, con=engine, if_exists="append", index=False)
-print(f"✅ Inserted {len(df)} rows into {DB_TABLE}")
-
-# ==============================
-# STEP 5: PUSH TO POWER BI STREAMING DATASET
-# ==============================
-
-PBI_WORKSPACE_ID = os.getenv("PBI_WORKSPACE_ID")
-PBI_TENANT_ID = os.getenv("PBI_TENANT_ID")
-PBI_CLIENT_ID = os.getenv("PBI_CLIENT_ID")
-PBI_CLIENT_SECRET = os.getenv("PBI_CLIENT_SECRET")
-
-TARGET_DATASET_NAME = "MeSYSoil"  # <-- Update to match your streaming dataset
-
-
 print("🔑 Authenticating Power BI Service Principal...")
 pbi_app = msal.ConfidentialClientApplication(PBI_CLIENT_ID, authority=f"https://login.microsoftonline.com/{PBI_TENANT_ID}", client_credential=PBI_CLIENT_SECRET)
 pbi_token = pbi_app.acquire_token_for_client(scopes=["https://analysis.windows.net/powerbi/api/.default"])
@@ -220,13 +189,10 @@ PBI_DATASET_ID = dataset["id"]
 tables_url = f"https://api.powerbi.com/v1.0/myorg/groups/{PBI_WORKSPACE_ID}/datasets/{PBI_DATASET_ID}/tables"
 PBI_TABLE_NAME = requests.get(tables_url, headers=pbi_headers).json()["value"][0]["name"]
 
-# Format Date for Power BI push (ISO string)
-df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime('%Y-%m-%d')
-
-# Prepare rows for Power BI
+# Prepare rows
 rows_to_push = df.replace([np.nan, np.inf, -np.inf], None).to_dict(orient="records")
 
-# Clear old data
+# Clear old rows in streaming dataset
 pbi_clear_url = f"https://api.powerbi.com/v1.0/myorg/groups/{PBI_WORKSPACE_ID}/datasets/{PBI_DATASET_ID}/tables/{PBI_TABLE_NAME}/rows"
 print("🗑 Clearing old rows in Power BI...")
 requests.delete(pbi_clear_url, headers=pbi_headers)
@@ -239,4 +205,4 @@ for i in range(0, len(rows_to_push), 10000):
     if resp.status_code not in [200, 202]:
         print(f"❌ Failed to push batch {i//10000+1}: {resp.status_code} {resp.text}")
         raise SystemExit("Stopping due to API error.")
-print("🎉 Data successfully pushed to Power BI!")
+print("🎉 Data successfully pushed to Power BI (no MySQL used)!")
