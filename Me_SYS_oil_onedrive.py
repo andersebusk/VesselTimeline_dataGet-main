@@ -221,6 +221,9 @@ PBI_TABLE_NAME = requests.get(tables_url, headers=pbi_headers).json()["value"][0
 # Prepare rows
 rows_to_push = df.replace([np.nan, np.inf, -np.inf], None).to_dict(orient="records")
 
+print("🛠 Preview 'Oil On Label' values being pushed to Power BI:")
+for r in rows_to_push[:10]:  # Show first 10 rows for inspection
+    print(f"Vessel: {r.get('Vessel Name')}, Date: {r.get('Date')}, Oil On Label: {r.get('Oil On Label')}")
 # Clear old rows in streaming dataset
 pbi_clear_url = f"https://api.powerbi.com/v1.0/myorg/groups/{PBI_WORKSPACE_ID}/datasets/{PBI_DATASET_ID}/tables/{PBI_TABLE_NAME}/rows"
 print("🗑 Clearing old rows in Power BI...")
